@@ -1,0 +1,70 @@
+# Default configuration for the Multimodal Medical Imaging Assistant.
+# Override any field with --set key.subkey=value on the CLI, or copy this
+# file and pass --config path/to/your.yaml.
+
+seed: 42
+
+data:
+  cxr:
+    root: "data_raw/nih_cxr"          # expects images/ + labels csv
+    labels_csv: "data_raw/nih_cxr/labels.csv"
+    image_col: "image_path"
+    label_cols: ["Atelectasis", "Cardiomegaly", "Consolidation", "Edema", "Pleural Effusion"]
+    image_size: 224
+  derm:
+    root: "data_raw/isic"
+    labels_csv: "data_raw/isic/labels.csv"
+    image_col: "image_path"
+    label_cols: ["melanoma", "nevus", "other"]
+    image_size: 224
+  val_fraction: 0.15
+  test_fraction: 0.15
+  num_workers: 4
+
+model:
+  backbone: "densenet121"     # any timm backbone name
+  pretrained: true
+  freeze_backbone_stages: 2   # freeze first N stages; 0 = full fine-tune
+  dropout: 0.2
+
+train:
+  batch_size: 32
+  epochs: 20
+  lr: 1.0e-4
+  weight_decay: 1.0e-5
+  scheduler: "cosine"         # "cosine" | "none" -- cosine decay to min_lr with a linear warmup
+  warmup_epochs: 1
+  min_lr: 1.0e-6
+  amp: true
+  grad_clip_norm: 5.0
+  checkpoint_every_steps: 200
+  checkpoint_dir: "checkpoints"
+  resume: true
+  wandb_project: "multimodal-medical-imaging-assistant"
+  wandb_mode: "disabled"      # set to "online" once you have a W&B account
+
+calibrate:
+  max_iter: 50
+  lr: 0.01
+  n_bins: 15
+
+ood:
+  method: "mahalanobis"       # "max_softmax" | "entropy" | "mahalanobis" -- entropy measured AUROC 0.05 (worse
+                               # than random) on the CXR branch; Mahalanobis measured 1.0 on both branches. See
+                               # README "Results so far" for the comparison. Needs eval.run_eval to have been run
+                               # at least once (fits and saves checkpoints/<modality>_mahalanobis.npz); app/load.py
+                               # falls back to entropy automatically if that file is missing.
+  fpr_target_tpr: 0.95
+
+report:
+  claude_model: "claude-sonnet-5"
+  disclaimer: >
+    This is a research demo, not a diagnostic device. It has not been
+    reviewed or approved for clinical use. Do not use this output to make
+    or inform any medical decision. Always consult a qualified healthcare
+    professional.
+
+app:
+  audit_log_path: "logs/audit_log.jsonl"
+  host: "0.0.0.0"
+  port: 7860

@@ -1,0 +1,16 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2
+torchvision>=0.17
+timm>=0.9.16
+grad-cam>=1.5.0
+scikit-learn>=1.4
+pandas>=2.2
+numpy>=1.26
+Pillow>=10.2
+matplotlib>=3.8
+pyyaml>=6.0
+pydantic>=2.6
+anthropic>=0.34
+gradio>=4.29
+wandb>=0.16
+tqdm>=4.66
