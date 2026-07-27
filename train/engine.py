@@ -51,10 +51,20 @@ def compute_class_weights(labels: list[int], num_classes: int) -> torch.Tensor:
     return torch.tensor(weights, dtype=torch.float32)
 
 
-def _multilabel_loss(logits, batch, pos_weight):
+def _multilabel_loss(logits, batch, pos_weight, focal_gamma: float = 0.0):
+    """BCE with per-class pos_weight; if `focal_gamma > 0`, scales each term by
+    a focal factor (1 - p_t)^gamma so well-classified (easy) examples
+    contribute less and the loss concentrates on the hard, usually-minority
+    positives -- pos_weight alone reweights by class frequency but still
+    treats every example within a class equally regardless of how confident
+    the model already is on it."""
     loss_unreduced = F.binary_cross_entropy_with_logits(
         logits, batch["labels"], pos_weight=pos_weight, reduction="none"
     )
+    if focal_gamma > 0:
+        p = torch.sigmoid(logits)
+        p_t = p * batch["labels"] + (1 - p) * (1 - batch["labels"])
+        loss_unreduced = loss_unreduced * (1 - p_t).pow(focal_gamma)
     mask = batch["loss_mask"]
     return (loss_unreduced * mask).sum() / mask.sum().clamp(min=1)
 
@@ -72,6 +82,7 @@ def train_one_epoch(
     global_step: int = 0,
     log_fn=None,
     lr_schedule_fn=None,
+    focal_gamma: float = 0.0,
 ):
     model.train()
     running_loss = 0.0
@@ -90,7 +101,7 @@ def train_one_epoch(
             if task == "multilabel":
                 labels = batch["labels"].to(device)
                 mask = batch["loss_mask"].to(device)
-                loss = _multilabel_loss(logits, {"labels": labels, "loss_mask": mask}, pos_weight)
+                loss = _multilabel_loss(logits, {"labels": labels, "loss_mask": mask}, pos_weight, focal_gamma)
             else:
                 labels = batch["label"].to(device)
                 loss = F.cross_entropy(logits, labels, weight=class_weight)

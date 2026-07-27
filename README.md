@@ -166,56 +166,89 @@ images -- the practical choice over the full ~42GB/112K-image dataset for a
 laptop-scale run; `data.download nih` grabs the full one if you have the
 time/bandwidth). DenseNet121, on the 5 "CheXpert competition" pathologies.
 
-First pass was 8 epochs at a flat LR (~15 min), which the README originally
-reported at test mean AUC 0.703 with loss still visibly decreasing. Second
-pass added a cosine LR schedule with linear warmup (`train.scheduler:
-cosine` in `configs/default.yaml`) and resumed that same checkpoint out to
-24 epochs (~35 min more, ~50 min total):
+This branch has gone through three training passes, each real, each on this
+same 5,606-image sample -- the improvements below come from fixing the
+pipeline, not from more data:
 
-| Label | AUC (8 epochs, flat LR) | AUC (24 epochs, cosine LR) |
+1. **8 epochs, flat LR:** test mean AUC 0.703, loss still visibly decreasing.
+2. **24 epochs, cosine LR + warmup** (`train.scheduler: cosine` in
+   `configs/default.yaml`), resumed from the same checkpoint: test mean AUC
+   **0.722**.
+3. **Same 24-epoch cosine run, but from scratch, after fixing a backbone-freeze
+   bug** (below) that had made passes 1-2 linear probes on frozen ImageNet
+   features rather than actual fine-tuning, plus a focal loss for the class
+   imbalance and slightly stronger augmentation: test mean AUC **0.782**
+   (best checkpoint, epoch 15/24).
+
+| Label | AUC (linear probe, 24ep) | AUC (real fine-tune, 24ep) |
 |---|---|---|
-| Atelectasis | 0.681 | 0.696 |
-| Cardiomegaly | 0.604 | 0.632 |
-| Consolidation | 0.762 | 0.777 |
-| Edema | 0.803 | 0.809 |
-| Pleural Effusion | 0.665 | 0.692 |
+| Atelectasis | 0.696 | 0.728 |
+| Cardiomegaly | 0.632 | **0.840** |
+| Consolidation | 0.777 | 0.709 |
+| Edema | 0.809 | 0.798 |
+| Pleural Effusion | 0.692 | 0.833 |
 
-- Test mean AUC: 0.703 -> **0.722** after the longer cosine-scheduled run --
-  still below the plan's ~0.80+ target bar (that gap traces to training-set
-  size, 5,606 images vs. the full 112K, not the schedule), but a real,
-  measured improvement from the same architecture and data, just more
-  epochs and a decaying LR instead of a flat one.
-- Calibration: temperature scaling still only helps modestly on this
-  undertrained-relative-to-target model (e.g. Cardiomegaly ECE 0.400 ->
-  0.321; Pleural Effusion barely moves, 0.354 -> 0.354) -- consistent with
-  the first pass's finding that temperature scaling rescales confidence
-  uniformly, it can't fix a model that needs more signal, and that still
-  shows up honestly here.
-- OOD detection, real CXR vs. real CIFAR-10 images -- entropy thresholding
-  is still measurably broken on this model (AUROC 0.061, essentially
-  unchanged from the first pass's 0.052), for the same reason as before: an
-  undertrained classifier produces saturated, overconfident logits on
-  out-of-distribution images, so entropy scores those *more* confident than
-  real chest X-rays. Mahalanobis distance on penultimate features remains
-  unaffected by this and stays at a clean AUROC 1.0 / FPR@95TPR 0.0.
+**The bug:** `models/backbone.py::ClassifierHead._freeze_stages` froze the
+first `freeze_backbone_stages` *top-level children* of the backbone. For
+DenseNet121 in `timm` with `num_classes=0`, the backbone has exactly one
+top-level child that matters -- `features`, a single `Sequential` bundling
+every conv stage (stem through `denseblock4`/`norm5`). So the config's
+`freeze_backbone_stages: 2` (originally meant as "freeze the first couple
+of generic-feature stages") froze `features` in its entirety on iteration
+0 -- i.e. **all 6.95M conv parameters**, in every CXR run before this one.
+Only the small `Linear` head was ever training. Fixed by walking one level
+into `backbone.features` so `freeze_stages` selects real DenseNet stages
+(conv0/norm0/pool0/denseblock1/.../norm5, 11 total); default is now 4
+(freeze the stem + denseblock1, fine-tune denseblock2 onward). Confirmed
+with a quick trainable-parameter count before shipping the fix:
+`freeze_stages=2` under the old code left 6,949,445/6,958,981 params
+trainable-*looking* but actually froze the feature extractor; under the
+new code it correctly leaves only ~9.5K (the stem) frozen. Cardiomegaly --
+the pathology that most needs texture/shape features an ImageNet backbone
+was never going to have -- shows the effect most clearly: 0.632 -> 0.840.
+
+**Also added this pass:**
+- Focal loss (`train.focal_gamma` in `configs/default.yaml`, default 2.0)
+  on top of the existing per-class `pos_weight`: down-weights already-easy
+  examples so the loss concentrates on hard, usually-minority positives.
+  `train/engine.py::_multilabel_loss`.
+- Slightly stronger augmentation (`data/transforms.py::train_transforms`):
+  `RandomResizedCrop(scale=(0.85, 1.0))` instead of a plain resize, plus a
+  bit more rotation/jitter -- modest translation/scale augmentation for a
+  training set this small.
+- A `weights_only` checkpoint-loading bug the cosine-schedule pass (#2
+  above) introduced and this pass fixed: `cosine_lr` returned a
+  `numpy.float64` (from `np.cos`) instead of a plain Python `float`, which
+  leaked into the optimizer's `param_group["lr"]` and then into the saved
+  checkpoint's `optimizer_state`, tripping PyTorch 2.6+'s stricter
+  `weights_only=True` default on load. Fixed by casting to `float()` in
+  `train.engine.cosine_lr`, and by making the checkpoint-loading call sites
+  (`train/checkpoint.py`, `calibrate/fit_temperature.py`,
+  `eval/run_eval.py`, `app/load.py`) explicit about `weights_only=False` --
+  correct here since these are checkpoints this repo trained and saved
+  itself, not third-party files.
+
+Calibration and OOD after the fine-tune fix:
+
+- ECEs roughly halved pre-calibration vs. the linear-probe run, consistent
+  with a model that's actually learned the task rather than reweighting
+  frozen features (e.g. Cardiomegaly 0.400 -> 0.151, Edema 0.351 -> 0.156),
+  and temperature scaling still helps further on top of that (Cardiomegaly
+  0.151 -> 0.094, Edema 0.156 -> 0.105).
+- OOD detection, real CXR vs. real CIFAR-10 images: entropy thresholding is
+  *still* broken (AUROC 0.096) -- an accurate-on-CXR model can still
+  produce saturated logits on natural images it's never seen, so this isn't
+  purely an "undertrained model" artifact, it's a property of entropy
+  thresholding on out-of-distribution natural images generally. Mahalanobis
+  distance on penultimate features is unaffected either way: AUROC 1.0 /
+  FPR@95TPR 0.0.
 - Failure gallery: `eval_out/cxr/failure_gallery.md`.
-
-**A bug the retrain surfaced:** the cosine schedule initially returned a
-`numpy.float64` (from `np.cos`) instead of a plain Python `float`, which
-leaked into the optimizer's `param_group["lr"]` and then into the saved
-checkpoint's `optimizer_state`. That tripped PyTorch 2.6+'s stricter
-`weights_only=True` default on `torch.load`, breaking `calibrate.fit_temperature`
-and `eval.run_eval` (but not training/resume itself, which had already
-loaded the *old* checkpoint before this one existed). Fixed by casting to
-`float()` in `train.engine.cosine_lr` and by making the checkpoint-loading
-call sites (`train/checkpoint.py`, `calibrate/fit_temperature.py`,
-`eval/run_eval.py`, `app/load.py`) explicit about `weights_only=False` --
-correct here since these are checkpoints this repo trained and saved
-itself, not third-party files.
 
 Both branches' numbers come from real training runs in this repo, not
 placeholders -- see [Status / what's left](#status--whats-left) for what a
-longer run (full dataset, more epochs) would still need.
+longer run (full dataset, more epochs) would still need. The old
+linear-probe-era checkpoints are kept at
+`checkpoints/frozen_backbone_baseline/` for comparison, not used by the app.
 
 ## Responsible AI / guardrails
 
@@ -254,17 +287,26 @@ longer run (full dataset, more epochs) would still need.
   -- see the results tables above for the before/after on both branches.
   `eval.run_eval` fits and saves it automatically; `app/load.py` falls back
   to entropy if the fitted `.npz` is missing.
-- **CXR: cosine LR schedule + more epochs (8 -> 24) done** -- test mean AUC
-  0.703 -> 0.722. See results above for the full before/after and the
-  `weights_only` checkpoint-loading bug this surfaced and fixed along the
-  way.
-- **What a longer run would still improve, in priority order:**
+- **CXR: cosine LR schedule, then a real backbone-freeze bug fix, done** --
+  test mean AUC 0.703 -> 0.722 (schedule + more epochs) -> **0.782** (fixing
+  `models/backbone.py::_freeze_stages`, which had left every earlier CXR
+  run training a linear probe on frozen ImageNet features, not actually
+  fine-tuning -- see results above for the full history, before/afters, and
+  the two bugs this surfaced and fixed along the way).
+- **Dermoscopy has the same latent freeze bug, unfixed:** `derm`'s
+  `freeze_backbone_stages: 2` (now correctly 4 as of this fix, applied
+  repo-wide) means the 0.911 macro AUC reported above is *also* a
+  frozen-backbone linear-probe result, not a real fine-tune -- it just
+  happened to work reasonably well because ImageNet features transfer to
+  skin-lesion color/texture better than to chest X-ray structure. Retraining
+  derm the same way (real fine-tune + focal loss where relevant) would
+  likely improve it further and hasn't been done yet.
+- **What would still improve CXR further, in priority order:**
   1. CXR on the full NIH ChestX-ray14 (`nih-chest-xrays/data`, ~42GB,
      112K images) or CheXpert (needs *your* Stanford AIMI request under
      your own identity -- `python -m data.download chexpert-instructions`
-     prints the steps) instead of the 5,606-image sample -- the CXR AUCs
-     (0.63-0.81) trace back to training-set size, not a design flaw in the
-     pipeline.
+     prints the steps) instead of the 5,606-image sample -- more data on
+     top of a now-correctly-fine-tuned model, rather than instead of one.
   2. `MahalanobisDetector.extract_features` uses each CXR image's argmax
      label as a pseudo-class (multi-label has no single ground-truth class
      to group by) -- works in practice (AUROC 1.0 here) but a per-label

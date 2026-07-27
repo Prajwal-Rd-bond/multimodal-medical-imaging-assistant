@@ -18,10 +18,13 @@ def train_transforms(image_size: int = 224) -> T.Compose:
     return T.Compose(
         [
             T.Lambda(_to_rgb),
-            T.Resize((image_size, image_size)),
+            # RandomResizedCrop instead of a plain Resize -- a mild crop (0.85-1.0
+            # of the image) gives some translation/scale augmentation on top of
+            # flip/rotation/jitter, useful on a small (5-6k image) training set.
+            T.RandomResizedCrop((image_size, image_size), scale=(0.85, 1.0), ratio=(0.95, 1.05)),
             T.RandomHorizontalFlip(p=0.5),
-            T.RandomRotation(degrees=10),
-            T.ColorJitter(brightness=0.1, contrast=0.1),
+            T.RandomRotation(degrees=15),
+            T.ColorJitter(brightness=0.15, contrast=0.15),
             T.ToTensor(),
             T.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
         ]

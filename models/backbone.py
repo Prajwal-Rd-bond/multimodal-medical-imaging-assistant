@@ -38,14 +38,16 @@ class ClassifierHead(nn.Module):
             self._freeze_stages(freeze_stages)
 
     def _freeze_stages(self, n: int) -> None:
-        try:
-            feature_info = self.backbone.feature_info
-        except AttributeError:
-            return  # backbone doesn't expose stage info; skip freezing
-        modules = dict(self.backbone.named_children())
-        # Heuristic: freeze the first n top-level children (works for
-        # DenseNet/ResNet/EfficientNet-style timm models where children are
-        # roughly ordered stem -> stage1 -> stage2 -> ...).
+        # DenseNet/VGG-style timm models bundle every conv stage into one
+        # top-level `features` Sequential (stem, denseblock1, transition1, ...,
+        # denseblock4, norm5) -- freezing top-level children of the backbone
+        # itself would freeze that whole Sequential as a single "stage" (i.e.
+        # the entire feature extractor) for any n >= 1. Walk one level deeper
+        # into `features` when present so `n` actually selects individual
+        # stages; fall back to top-level children (ResNet/EfficientNet-style,
+        # where stages already are top-level modules) otherwise.
+        container = getattr(self.backbone, "features", self.backbone)
+        modules = dict(container.named_children())
         for i, (_, module) in enumerate(modules.items()):
             if i >= n:
                 break

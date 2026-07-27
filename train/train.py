@@ -153,6 +153,7 @@ def run(cfg, modality: str):
             pos_weight=pos_weight, class_weight=class_weight,
             grad_clip_norm=cfg.train.grad_clip_norm, global_step=global_step, log_fn=log_fn,
             lr_schedule_fn=lr_schedule_fn,
+            focal_gamma=getattr(cfg.train, "focal_gamma", 0.0) if task == "multilabel" else 0.0,
         )
 
         val_metrics, _, _ = evaluate(model, val_loader, device, task, label_names)

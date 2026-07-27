@@ -24,7 +24,15 @@ data:
 model:
   backbone: "densenet121"     # any timm backbone name
   pretrained: true
-  freeze_backbone_stages: 2   # freeze first N stages; 0 = full fine-tune
+  # Freezes the first N children of the backbone's `features` block (DenseNet121:
+  # conv0, norm0, pool0, denseblock1, transition1, denseblock2, ..., norm5 -- 11
+  # total). 4 = freeze the stem + denseblock1 (generic edge/texture filters),
+  # fine-tune denseblock2 onward. 0 = full fine-tune. NOTE: prior to fixing
+  # models/backbone.py::_freeze_stages, any value >= 1 froze the ENTIRE backbone
+  # (all conv stages were bundled under one top-level `features` child) -- every
+  # earlier CXR run in this repo's history was training a linear probe on frozen
+  # ImageNet features, not actually fine-tuning. See README results for the fix.
+  freeze_backbone_stages: 4
   dropout: 0.2
 
 train:
@@ -35,6 +43,7 @@ train:
   scheduler: "cosine"         # "cosine" | "none" -- cosine decay to min_lr with a linear warmup
   warmup_epochs: 1
   min_lr: 1.0e-6
+  focal_gamma: 2.0            # multilabel (CXR) only; 0 = plain pos_weight-BCE, no focal term
   amp: true
   grad_clip_norm: 5.0
   checkpoint_every_steps: 200
