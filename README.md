@@ -133,31 +133,45 @@ python -m app.gradio_app
 Trained end-to-end on this repo, on a MacBook (Apple M4 Pro, MPS backend --
 no CUDA needed) against a real, class-balanced ISIC Archive sample (1,200
 melanoma / 1,200 nevus / 1,200 other, pulled via `data.download isic`, since
-plain unfiltered ISIC pulls turn out to be >97% nevus). DenseNet121, 8
-epochs, ~35 min total.
+plain unfiltered ISIC pulls turn out to be >97% nevus). DenseNet121.
 
-| Label | AUC |
-|---|---|
-| melanoma | 0.870 |
-| nevus | 0.957 |
-| other | 0.907 |
+Like the CXR branch (see above), the first derm run also trained under the
+`_freeze_stages` bug -- `freeze_backbone_stages: 2` froze DenseNet121's
+entire `features` block, so this was a linear probe on frozen ImageNet
+features, not a fine-tune. It happened to score reasonably (0.911 macro
+AUC) because ImageNet features transfer to skin-lesion color/texture better
+than to chest-X-ray structure, which masked the bug here for longer than on
+CXR. After fixing `models/backbone.py::_freeze_stages` (real fine-tuning,
+denseblock2 onward) and retraining from scratch, 24 epochs, cosine LR:
 
-- Test accuracy: 75.7% (macro AUC 0.911) on the 3-way held-out test split.
-- Calibration: ECE 0.080 -> 0.038 after temperature scaling (T=0.84).
+| Label | AUC (linear probe, 8ep) | AUC (real fine-tune, 24ep) |
+|---|---|---|
+| melanoma | 0.870 | 0.953 |
+| nevus | 0.957 | 0.981 |
+| other | 0.907 | 0.979 |
+
+- Test accuracy: 75.7% -> **87.4%** (macro AUC 0.911 -> **0.969**) on the
+  3-way held-out test split.
+- Calibration: ECE (pre-scaling) 0.080 -> 0.050, and temperature scaling
+  still helps on top of that: 0.050 -> 0.032 (T=1.18).
 - OOD detection, real ISIC vs. real CIFAR-10 images -- entropy vs.
   Mahalanobis (`ood/detectors.py::MahalanobisDetector`, fit on penultimate
   features from the training set):
 
   | Method | AUROC | FPR@95TPR |
   |---|---|---|
-  | entropy | 0.859 | 0.734 |
-  | Mahalanobis | **0.9999** | **0.0** |
+  | entropy | 0.858 | 0.656 |
+  | Mahalanobis | **0.99997** | **0.0** |
 
   Mahalanobis is now the default (`ood.method` in `configs/default.yaml`).
-- Failure gallery: the highest-confidence misses are almost all
+  Both methods land close to the linear-probe run's numbers -- unlike CXR,
+  entropy thresholding was never badly broken here, it's just consistently
+  worse than Mahalanobis.
+- Failure gallery: the highest-confidence misses are still almost all
   melanoma<->nevus confusions -- the model is making the same mistake a
   human would find hardest, not a nonsensical one. See
-  `eval_out/derm/failure_gallery.md`.
+  `eval_out/derm/failure_gallery.md`. Old linear-probe checkpoints are kept
+  at `checkpoints/frozen_backbone_baseline/` for comparison.
 
 ### Results so far: CXR branch (real data, real training run)
 
@@ -293,14 +307,12 @@ linear-probe-era checkpoints are kept at
   run training a linear probe on frozen ImageNet features, not actually
   fine-tuning -- see results above for the full history, before/afters, and
   the two bugs this surfaced and fixed along the way).
-- **Dermoscopy has the same latent freeze bug, unfixed:** `derm`'s
-  `freeze_backbone_stages: 2` (now correctly 4 as of this fix, applied
-  repo-wide) means the 0.911 macro AUC reported above is *also* a
-  frozen-backbone linear-probe result, not a real fine-tune -- it just
-  happened to work reasonably well because ImageNet features transfer to
-  skin-lesion color/texture better than to chest X-ray structure. Retraining
-  derm the same way (real fine-tune + focal loss where relevant) would
-  likely improve it further and hasn't been done yet.
+- **Dermoscopy retrained with the same fix:** macro AUC 0.911 -> **0.969**,
+  accuracy 75.7% -> 87.4%. The original 0.911 was also a frozen-backbone
+  linear-probe result -- it just scored reasonably because ImageNet
+  features transfer to skin-lesion color/texture better than to chest
+  X-ray structure, which masked the bug here longer than on CXR. See
+  results above for the full before/after.
 - **What would still improve CXR further, in priority order:**
   1. CXR on the full NIH ChestX-ray14 (`nih-chest-xrays/data`, ~42GB,
      112K images) or CheXpert (needs *your* Stanford AIMI request under
