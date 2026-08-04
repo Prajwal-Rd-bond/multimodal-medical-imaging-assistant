@@ -41,9 +41,21 @@ def analyze(image: Image.Image):
     log_inference(cfg.app.audit_log_path, image, result)
 
     overlay = result.overlays[0] if result.overlays else None
-    overlay_caption = result.overlay_labels[0] if result.overlay_labels else ""
+    if result.overlay_labels:
+        overlay_caption = result.overlay_labels[0]
+        if not result.overlay_confident:
+            overlay_caption += " (below confidence threshold -- see warning below)"
+    else:
+        overlay_caption = ""
 
     flags = []
+    if not result.overlay_confident:
+        flags.append(
+            "⚠️ No finding cleared the confidence threshold -- the heatmap shown is the "
+            "model's top (unconfident) guess only. Grad-CAM gradients are weak and "
+            "noisy at low confidence and routinely highlight anatomically meaningless "
+            "regions (bony edges, image borders). Do not read it as a localized finding."
+        )
     if result.findings.ood_flag:
         flags.append("⚠️ Out-of-distribution input -- treat all findings as unreliable")
     for f in result.findings.findings:

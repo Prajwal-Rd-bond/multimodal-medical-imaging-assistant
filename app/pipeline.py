@@ -51,6 +51,7 @@ class InferenceResult:
     overlay_labels: list[str]
     findings: StructuredFindings
     report_text: str
+    overlay_confident: bool
 
 
 def _probs_from_logits(logits: torch.Tensor, task: str) -> np.ndarray:
@@ -85,7 +86,16 @@ def run_inference(
     else:
         ood_score = float(entropy_score(raw_probs[None, :], multilabel=multilabel)[0])
 
-    heatmaps = pipeline.explainer.explain_top_k(image_tensor, raw_probs, pipeline.label_names, threshold=0.5, top_k=3)
+    overlay_threshold = 0.5
+    # Grad-CAM always returns *a* heatmap, even for a class the model never
+    # actually called positive (explain_top_k's "always explain the top
+    # prediction" fallback) -- gradients for a low/unconfident logit are weak
+    # and noisy and routinely light up clinically meaningless regions (bony
+    # edges, image borders) rather than anything real. Track whether any
+    # label actually cleared the threshold so callers can avoid presenting
+    # that fallback heatmap as if it were a genuine localized finding.
+    overlay_confident = bool(np.any(raw_probs >= overlay_threshold))
+    heatmaps = pipeline.explainer.explain_top_k(image_tensor, raw_probs, pipeline.label_names, threshold=overlay_threshold, top_k=3)
 
     findings = build_structured_findings(
         modality=pipeline.modality,
@@ -108,6 +118,7 @@ def run_inference(
         overlay_labels=[h.label for h in heatmaps],
         findings=findings,
         report_text=report_text,
+        overlay_confident=overlay_confident,
     )
 
 

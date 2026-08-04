@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-raised: #ffffff;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --border: rgba(11, 11, 11, 0.1);
+  --border-strong: #e1e0d9;
+
+  --brand: #2a78d6;
+  --brand-ink: #ffffff;
+
+  --seq-100: #cde2fb;
+  --seq-250: #86b6ef;
+  --seq-400: #3987e5;
+  --seq-500: #256abf;
+  --seq-650: #104281;
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  --cat-derm: #4a3aa7;
+
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  color: var(--text-primary);
+  background: var(--page);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-raised: #212120;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --border: rgba(255, 255, 255, 0.1);
+    --border-strong: #2c2c2a;
+
+    --brand: #3987e5;
+    --brand-ink: #0d0d0d;
+
+    --seq-100: #184f95;
+    --seq-250: #1c5cab;
+    --seq-400: #3987e5;
+    --seq-500: #5598e7;
+    --seq-650: #9ec5f4;
+
+    --status-good: #0ca30c;
+    --status-warning: #fab219;
+    --status-serious: #ec835a;
+    --status-critical: #e66767;
+
+    --cat-derm: #9085e9;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-raised: #212120;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: #2c2c2a;
+
+  --brand: #3987e5;
+  --brand-ink: #0d0d0d;
+
+  --seq-100: #184f95;
+  --seq-250: #1c5cab;
+  --seq-400: #3987e5;
+  --seq-500: #5598e7;
+  --seq-650: #9ec5f4;
+
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #e66767;
+
+  --cat-derm: #9085e9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+::selection {
+  background: var(--seq-250);
+  color: var(--text-primary);
+}

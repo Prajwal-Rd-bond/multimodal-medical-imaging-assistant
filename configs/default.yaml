@@ -53,7 +53,12 @@ train:
   wandb_mode: "disabled"      # set to "online" once you have a W&B account
 
 calibrate:
-  max_iter: 50
+  # 50 was too few for LBFGS to converge on the larger (29,355-image) CXR
+  # validation set -- confirmed by comparing max_iter=50/200/500/2000: ECE
+  # kept improving through 500 and was identical at 500 vs 2000, so 500 is
+  # the converged optimum, not an arbitrary bump. Still converges just as
+  # well (same result) on derm's smaller validation set.
+  max_iter: 500
   lr: 0.01
   n_bins: 15
 

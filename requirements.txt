@@ -14,3 +14,7 @@ anthropic>=0.34
 gradio>=4.29
 wandb>=0.16
 tqdm>=4.66
+huggingface_hub>=0.24
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9

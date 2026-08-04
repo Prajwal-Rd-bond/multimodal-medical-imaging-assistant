@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+node_modules/
+dist/
 data_raw/
 checkpoints/
 eval_out/
